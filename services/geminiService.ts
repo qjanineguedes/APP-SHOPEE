@@ -121,6 +121,52 @@ const pcmToWav = (base64Pcm: string): string => {
   return btoa(binary);
 };
 
+// Helper function to force 150 char limit
+const enforceShopeeLimit = (caption: string, hashtags: string[]): { caption: string, hashtags: string[] } => {
+  const MAX_CHARS = 150;
+  
+  // Clean input
+  let cleanCaption = caption.trim();
+  // Ensure valid hashtags
+  let cleanHashtags = hashtags
+    .map(tag => tag.replace(/[#\s.,;!?]/g, ''))
+    .filter(tag => tag.length > 1);
+
+  // Calculate current length of hashtags (including spaces and #)
+  const calculateHashtagLength = (tags: string[]) => {
+    if (tags.length === 0) return 0;
+    // Each tag adds '#' + length + ' ' (space)
+    // Actually, join(' ') adds spaces between.
+    const fullTagString = tags.map(t => `#${t}`).join(' ');
+    return fullTagString.length;
+  };
+
+  // 1. If hashtags alone exceed limit (unlikely but possible), reduce hashtags
+  while (calculateHashtagLength(cleanHashtags) > 100 && cleanHashtags.length > 1) {
+    cleanHashtags.pop();
+  }
+
+  const tagsLength = calculateHashtagLength(cleanHashtags);
+  // Space needed for separator if both exist
+  const separatorLength = (cleanCaption.length > 0 && tagsLength > 0) ? 1 : 0; 
+  
+  const availableForCaption = MAX_CHARS - tagsLength - separatorLength;
+
+  // 2. Truncate caption if necessary
+  if (cleanCaption.length > availableForCaption) {
+    if (availableForCaption < 10) {
+      // Priority to hashtags, caption is sacrificed
+      cleanCaption = "";
+    } else {
+      // Truncate and add ellipsis, ensuring we don't exceed limit
+      // Subtract 1 for ellipsis if needed, though strictly we just chop
+      cleanCaption = cleanCaption.substring(0, availableForCaption);
+    }
+  }
+
+  return { caption: cleanCaption, hashtags: cleanHashtags };
+};
+
 export const generateVideoContent = async (params: AIGenerationParams): Promise<GeneratedContent> => {
   const ai = getClient();
 
@@ -194,14 +240,13 @@ export const generateVideoContent = async (params: AIGenerationParams): Promise<
 
     const content = JSON.parse(text) as GeneratedContent;
 
-    // Limpeza básica (sem truncamento agressivo de caracteres)
-    if (content.caption) {
-      content.caption = content.caption.trim();
-    }
+    // Post-processing to strict enforce limits
+    const limitResult = enforceShopeeLimit(content.caption || "", content.hashtags || []);
+    content.caption = limitResult.caption;
+    content.hashtags = limitResult.hashtags;
 
-    if (Array.isArray(content.hashtags)) {
-      // Remove # e caracteres especiais, mantendo a integridade das tags
-      content.hashtags = content.hashtags
+    if (Array.isArray(content.tiktok?.hashtags)) {
+        content.tiktok!.hashtags = content.tiktok!.hashtags
         .map(tag => tag.replace(/[#\s.,;!?]/g, ''))
         .filter(tag => tag.length > 1);
     }

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ExternalVideo } from '../types';
-import { Download, Link as LinkIcon, Check, Copy, ExternalLink, Calendar, ShoppingBag, Trash2, Sparkles, Loader2, FileText, Send, Square, CheckSquare } from 'lucide-react';
+import { Download, Link as LinkIcon, Check, Copy, ExternalLink, Calendar, ShoppingBag, Trash2, Sparkles, Loader2, FileText, Send, Square, CheckSquare, ArrowDownAZ, ArrowUpAZ, ArrowDownWideNarrow, ArrowUpWideNarrow, Clock } from 'lucide-react';
 
 // Utility para cópia segura
 const copyToClipboard = async (text: string) => {
@@ -40,6 +40,11 @@ interface ExternalVideoListProps {
   onSelectAll?: () => void;
   onBulkImport?: () => void;
   bulkProgress?: { current: number, total: number } | null;
+
+  // Sort Props
+  sortType: 'date' | 'name';
+  sortOrder: 'asc' | 'desc';
+  onSortChange: (type: 'date' | 'name', order: 'asc' | 'desc') => void;
 }
 
 export const ExternalVideoList: React.FC<ExternalVideoListProps> = ({ 
@@ -52,15 +57,49 @@ export const ExternalVideoList: React.FC<ExternalVideoListProps> = ({
   onToggleSelect,
   onSelectAll,
   onBulkImport,
-  bulkProgress
+  bulkProgress,
+  sortType,
+  sortOrder,
+  onSortChange
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const handleCopyLink = async (text: string, id: string) => {
     const success = await copyToClipboard(text);
     if (success) {
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 2000);
+    }
+  };
+
+  const handleDownload = async (e: React.MouseEvent, url: string, name: string, id: string) => {
+    e.stopPropagation();
+    if (downloadingId) return;
+
+    setDownloadingId(id);
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Falha no download');
+        
+        const blob = await response.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `${name.replace(/[^a-z0-9]/gi, '_').substring(0, 50)}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        
+        // Cleanup
+        setTimeout(() => {
+            window.URL.revokeObjectURL(blobUrl);
+            document.body.removeChild(a);
+        }, 100);
+    } catch (err) {
+        console.error("Download failed, fallback to new tab", err);
+        window.open(url, '_blank');
+    } finally {
+        setDownloadingId(null);
     }
   };
 
@@ -99,12 +138,12 @@ export const ExternalVideoList: React.FC<ExternalVideoListProps> = ({
   return (
     <div className="space-y-4 relative pb-20">
       
-      {/* Header Actions */}
-      <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+      {/* Header Actions & Sort */}
+      <div className="flex flex-col sm:flex-row items-center justify-between bg-white p-3 rounded-xl border border-gray-100 shadow-sm gap-3">
         <button 
           onClick={onSelectAll}
           disabled={isBulkProcessing}
-          className={`flex items-center gap-2 text-sm font-medium transition-colors ${isBulkProcessing ? 'opacity-50 cursor-not-allowed text-gray-400' : 'text-gray-600 hover:text-shopee-600'}`}
+          className={`flex items-center gap-2 text-sm font-medium transition-colors w-full sm:w-auto ${isBulkProcessing ? 'opacity-50 cursor-not-allowed text-gray-400' : 'text-gray-600 hover:text-shopee-600'}`}
         >
           {selectedIds.length > 0 && selectedIds.length === videos.length ? (
             <CheckSquare size={18} className="text-shopee-500" />
@@ -113,11 +152,36 @@ export const ExternalVideoList: React.FC<ExternalVideoListProps> = ({
           )}
           {selectedIds.length > 0 ? `${selectedIds.length} selecionados` : 'Selecionar Todos'}
         </button>
+
+        {/* Sort Controls */}
+        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto no-scrollbar">
+            <button 
+                onClick={() => onSortChange('date', sortOrder === 'asc' && sortType === 'date' ? 'desc' : 'asc')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-all whitespace-nowrap ${sortType === 'date' ? 'bg-shopee-50 border-shopee-200 text-shopee-600 font-bold' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+            >
+                <Clock size={14} />
+                Data
+                {sortType === 'date' && (
+                    sortOrder === 'desc' ? <ArrowDownWideNarrow size={14}/> : <ArrowUpWideNarrow size={14}/>
+                )}
+            </button>
+             <button 
+                onClick={() => onSortChange('name', sortOrder === 'asc' && sortType === 'name' ? 'desc' : 'asc')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-all whitespace-nowrap ${sortType === 'name' ? 'bg-shopee-50 border-shopee-200 text-shopee-600 font-bold' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+            >
+                <FileText size={14} />
+                Nome
+                 {sortType === 'name' && (
+                    sortOrder === 'desc' ? <ArrowDownAZ size={14}/> : <ArrowUpAZ size={14}/>
+                )}
+            </button>
+        </div>
       </div>
 
       {videos.map((video) => {
         const isSelected = selectedIds.includes(video.id);
         const isProcessingThis = importingId === video.id;
+        const isDownloadingThis = downloadingId === video.id;
 
         return (
           <div 
@@ -157,16 +221,14 @@ export const ExternalVideoList: React.FC<ExternalVideoListProps> = ({
                   </div>
                   {/* Overlay actions on thumbnail */}
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                     <a 
-                        href={video.videoUrl} 
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-2 bg-white rounded-full text-gray-700 hover:text-shopee-500 hover:scale-110 transition-transform shadow-lg"
-                        title="Abrir Vídeo em Nova Aba"
-                        onClick={(e) => e.stopPropagation()}
+                     <button 
+                        onClick={(e) => handleDownload(e, video.videoUrl, video.productName, video.id)}
+                        disabled={!!downloadingId}
+                        className="p-2 bg-white rounded-full text-gray-700 hover:text-shopee-500 hover:scale-110 transition-transform shadow-lg disabled:opacity-75 disabled:cursor-wait"
+                        title="Baixar Vídeo"
                      >
-                       <ExternalLink size={18} />
-                     </a>
+                       {isDownloadingThis ? <Loader2 size={18} className="animate-spin text-shopee-500"/> : <Download size={18} />}
+                     </button>
                   </div>
                </div>
 

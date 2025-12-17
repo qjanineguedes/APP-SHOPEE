@@ -38,6 +38,7 @@ export interface VideoItem {
   status: ItemStatus;
   scheduledDate?: string; // ISO string
   createdAt: number;
+  updatedAt?: number; // Timestamp da última modificação
   postedAt?: number; // Timestamp de quando foi marcado como postado
   hasVideo?: boolean; // Flag indicando se existe arquivo de vídeo salvo
 }

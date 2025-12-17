@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { VideoItem } from '../types';
-import { Copy, Check, Trash2, Calendar, ShoppingBag, Hash, RefreshCw, Flame, Link as LinkIcon, Search, Loader2, ExternalLink, Download, Upload, ArrowRight, ClipboardCopy, Music, Music2, Eye, Layout, Image as ImageIcon } from 'lucide-react';
+import { Copy, Check, Calendar, ShoppingBag, RefreshCw, Flame, Link as LinkIcon, Search, Loader2, ExternalLink, Download, Upload, Music, Music2, Image as ImageIcon } from 'lucide-react';
 import { getVideo } from '../services/videoStorage';
 
 // Utility para cópia segura
@@ -31,7 +31,8 @@ const copyToClipboard = async (text: string) => {
 
 interface VideoItemCardProps {
   item: VideoItem;
-  onDelete: (id: string) => void;
+  // onDelete removed from visual interface, though prop exists for compatibility
+  onDelete?: (id: string) => void;
   onStatusChange: (id: string, status: VideoItem['status']) => void;
   onRegenerate: (item: VideoItem) => void;
   isGenerating?: boolean;
@@ -41,7 +42,6 @@ interface VideoItemCardProps {
 
 export const VideoItemCard: React.FC<VideoItemCardProps> = ({ 
   item, 
-  onDelete, 
   onStatusChange,
   onRegenerate,
   isGenerating,
@@ -201,22 +201,7 @@ export const VideoItemCard: React.FC<VideoItemCardProps> = ({
               </div>
             </div>
             
-            {/* Delete Button Fixed */}
-            <div className="flex items-center gap-1 relative z-20">
-              <button 
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onDelete(item.id);
-                }}
-                className="text-gray-400 hover:text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 group/del border border-transparent hover:border-red-100"
-                title="Excluir este vídeo permanentemente"
-              >
-                <Trash2 size={16} className="group-hover/del:scale-110 transition-transform"/>
-                <span className="text-xs font-medium">Excluir</span>
-              </button>
-            </div>
+            {/* Delete Button Removed as Requested */}
           </div>
 
           {/* AI Content Area */}

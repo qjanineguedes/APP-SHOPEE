@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Video, CheckCircle2, Inbox, Bell, ShoppingBag, CalendarDays, Wrench, Sparkles, User, TrendingUp, LayoutGrid, Mic, Megaphone, CheckCircle, RefreshCw, Eraser, Clock } from 'lucide-react';
+import { Plus, Video, CheckCircle2, Inbox, Bell, ShoppingBag, CalendarDays, Wrench, Sparkles, User, TrendingUp, LayoutGrid, Mic, Megaphone, CheckCircle, RefreshCw, Eraser, Clock, ArrowDownWideNarrow, ArrowUpWideNarrow } from 'lucide-react';
 import { VideoItem, ItemStatus, ExternalVideo, ToolConfig } from './types';
 import { VideoItemCard } from './components/VideoItemCard';
 import { PostedVideoList } from './components/PostedVideoList';
@@ -42,10 +42,25 @@ export const App = () => {
         } catch { return []; }
     });
     
-    const [externalVideos, setExternalVideos] = useState<ExternalVideo[]>([]);
+    // Ref to ensure async functions always access the latest dismissed list
+    const dismissedIdsRef = useRef(dismissedIds);
+
+    // Initializing External Videos from LocalStorage for persistence
+    const [externalVideos, setExternalVideos] = useState<ExternalVideo[]>(() => {
+        try {
+            const saved = localStorage.getItem('shopee_external_videos');
+            return saved ? JSON.parse(saved) : [];
+        } catch { return []; }
+    });
+
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<'pending' | 'posted' | 'inbox' | 'tools'>('inbox');
     
+    // Sort States
+    const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc'); // General sort order (Pending/Posted)
+    const [inboxSortType, setInboxSortType] = useState<'date' | 'name'>('date');
+    const [inboxSortOrder, setInboxSortOrder] = useState<'desc' | 'asc'>('desc');
+
     const [loadingExternal, setLoadingExternal] = useState(false);
     const [lastVisit, setLastVisit] = useState(() => Number(localStorage.getItem('shopee_last_visit') || 0));
 
@@ -65,23 +80,26 @@ export const App = () => {
     }, [videoItems]);
 
     useEffect(() => {
+        dismissedIdsRef.current = dismissedIds;
         localStorage.setItem('shopee_dismissed_ids', JSON.stringify(dismissedIds));
     }, [dismissedIds]);
 
+    // Persist external videos whenever they change
     useEffect(() => {
-        if (activeTab === 'inbox') {
-            loadExternalVideos();
-        }
-    }, [activeTab]);
+        localStorage.setItem('shopee_external_videos', JSON.stringify(externalVideos));
+    }, [externalVideos]);
 
-    // Auto-refresh every 1 hour (3600000 ms)
+    // Auto-refresh every 5 minutes (300000 ms) and on mount
     useEffect(() => {
+        // Load immediately on mount to check for updates
+        loadExternalVideos(false); // False = don't clear existing tags on auto-refresh
+
         const interval = setInterval(() => {
-            console.log("Auto-refreshing external videos...");
-            loadExternalVideos();
-        }, 3600000);
+            console.log("Auto-refreshing external videos (5min)...");
+            loadExternalVideos(false);
+        }, 300000); // 5 minutes
         return () => clearInterval(interval);
-    }, [dismissedIds]); 
+    }, []); 
 
     const playMeow = () => {
         try {
@@ -98,13 +116,35 @@ export const App = () => {
         }
     };
 
-    const loadExternalVideos = async () => {
+    const loadExternalVideos = async (clearExistingTags = true) => {
         setLoadingExternal(true);
+
+        // Se solicitado (ex: clique manual), limpa as tags 'novo' dos itens JÁ existentes
+        if (clearExistingTags) {
+            setExternalVideos(prev => prev.map(v => ({ ...v, isNew: false })));
+        }
+
         try {
-            const videos = await fetchExternalVideos(lastVisit);
-            // Filter out videos that have been dismissed/deleted by the user
-            const filteredVideos = videos.filter(v => !dismissedIds.includes(v.id));
-            setExternalVideos(filteredVideos);
+            const fetchedVideos = await fetchExternalVideos(lastVisit);
+            
+            setExternalVideos(currentList => {
+                 // Use Ref to ensure we filter against the absolute latest blocked list
+                 const blockedIds = dismissedIdsRef.current;
+                 
+                 // 1. Filter fetched videos against Blocklist
+                 const allowedVideos = fetchedVideos.filter(v => !blockedIds.includes(v.id));
+                 
+                 // 2. Identify truly new videos (those not already in the current list)
+                 const currentIds = new Set(currentList.map(v => v.id));
+                 const newVideos = allowedVideos.filter(v => !currentIds.has(v.id));
+                 
+                 // 3. If no new videos, return current list to avoid unnecessary re-render
+                 if (newVideos.length === 0) return currentList;
+                 
+                 // 4. Merge: Add NEW videos to the existing list
+                 const merged = [...newVideos, ...currentList];
+                 return merged; // Sorting happens in render based on state
+            });
             
             const now = Date.now();
             setLastVisit(now);
@@ -118,11 +158,13 @@ export const App = () => {
 
     const handleDismissExternal = (id: string) => {
         setDismissedIds(prev => [...prev, id]);
+        // Also immediately remove from UI
         setExternalVideos(prev => prev.filter(v => v.id !== id));
     };
 
     const handleAddItem = (newItem: VideoItem) => {
-        setVideoItems(prev => [newItem, ...prev]);
+        const itemWithUpdate = { ...newItem, updatedAt: Date.now() };
+        setVideoItems(prev => [itemWithUpdate, ...prev]);
         playMeow();
         if (activeTab === 'inbox') setActiveTab('pending');
     };
@@ -136,7 +178,7 @@ export const App = () => {
 
     const handleStatusChange = (id: string, status: ItemStatus) => {
         setVideoItems(prev => prev.map(item => 
-            item.id === id ? { ...item, status, postedAt: status === 'posted' ? Date.now() : undefined } : item
+            item.id === id ? { ...item, status, postedAt: status === 'posted' ? Date.now() : undefined, updatedAt: Date.now() } : item
         ));
     };
 
@@ -151,7 +193,7 @@ export const App = () => {
              });
              
              setVideoItems(prev => prev.map(i => 
-                i.id === item.id ? { ...i, generatedContent: aiContent } : i
+                i.id === item.id ? { ...i, generatedContent: aiContent, updatedAt: Date.now() } : i
              ));
              playMeow();
         } catch (e) {
@@ -166,7 +208,7 @@ export const App = () => {
         try {
             const similar = await findSimilarProducts(item.productName, item.affiliateLink);
             setVideoItems(prev => prev.map(i => 
-                i.id === item.id ? { ...i, similarProducts: similar } : i
+                i.id === item.id ? { ...i, similarProducts: similar, updatedAt: Date.now() } : i
             ));
         } catch (e) {
             console.error(e);
@@ -198,6 +240,7 @@ export const App = () => {
                  similarProducts: similarProducts, // Auto-populated
                  status: 'ready',
                  createdAt: Date.now(),
+                 updatedAt: Date.now(),
                  hasVideo: false
              };
              
@@ -242,8 +285,52 @@ export const App = () => {
     
     const inboxTodayCount = externalVideos.filter(v => v.timestamp >= startOfDay).length;
 
-    const pendingItems = videoItems.filter(i => i.status !== 'posted').sort((a,b) => b.createdAt - a.createdAt);
-    const postedItemsList = videoItems.filter(i => i.status === 'posted').sort((a,b) => (b.postedAt || 0) - (a.postedAt || 0));
+    // Sorting Logic (Shared for Pending and Posted)
+    const sortItems = (items: VideoItem[]) => {
+        return items.sort((a, b) => {
+            // Prioritize updatedAt (Last Modified), fallback to createdAt
+            const timeA = a.updatedAt || a.createdAt;
+            const timeB = b.updatedAt || b.createdAt;
+            return sortOrder === 'desc' ? timeB - timeA : timeA - timeB;
+        });
+    };
+
+    const pendingItems = sortItems(videoItems.filter(i => i.status !== 'posted'));
+    
+    // Posted items logic: Sort by Modified Date (updatedAt) AND remove items older than 24 hours
+    const postedItemsList = videoItems
+        .filter(i => {
+            if (i.status !== 'posted') return false;
+            // 24 hours in milliseconds
+            const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+            const postedTime = i.postedAt || 0;
+            const age = Date.now() - postedTime;
+            // Keep only if younger than 24h
+            return age < ONE_DAY_MS;
+        })
+        .sort((a,b) => {
+             // Sort by updatedAt (modified) as requested, fallback to postedAt
+             const timeA = a.updatedAt || a.postedAt || 0;
+             const timeB = b.updatedAt || b.postedAt || 0;
+             // Always Descending for Posted by default logic, but using generic sortOrder ensures consistency
+             return sortOrder === 'desc' ? timeB - timeA : timeA - timeB;
+        });
+
+    // Sorting Logic for Inbox
+    const sortedExternalVideos = [...externalVideos].sort((a, b) => {
+        if (inboxSortType === 'name') {
+            const nameA = a.productName.toLowerCase();
+            const nameB = b.productName.toLowerCase();
+            return inboxSortOrder === 'asc' 
+                ? nameA.localeCompare(nameB) 
+                : nameB.localeCompare(nameA);
+        } else {
+            // Date Sorting
+            return inboxSortOrder === 'asc' 
+                ? a.timestamp - b.timestamp 
+                : b.timestamp - a.timestamp;
+        }
+    });
 
     return (
         <div className="min-h-screen bg-white text-gray-800 font-sans pb-20 md:pb-0">
@@ -301,7 +388,9 @@ export const App = () => {
                      >
                         <Inbox size={18} />
                         Recebidos
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${activeTab === 'inbox' ? 'bg-shopee-100 text-shopee-600' : 'bg-gray-100 text-gray-500'}`}>{inboxCount}</span>
+                        {inboxCount > 0 && (
+                           <span className={`text-xs px-2 py-0.5 rounded-full ${activeTab === 'inbox' ? 'bg-shopee-100 text-shopee-600' : 'bg-gray-100 text-gray-500'}`}>{inboxCount}</span>
+                        )}
                      </button>
 
                      <button
@@ -333,8 +422,31 @@ export const App = () => {
 
                 {activeTab === 'pending' && (
                     <div className="space-y-6">
+                        <div className="flex justify-between items-center">
+                           <h2 className="font-bold text-gray-700 text-lg">Itens em Preparação</h2>
+                           <button 
+                             onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+                             className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600 transition-colors"
+                           >
+                             {sortOrder === 'desc' ? <ArrowDownWideNarrow size={14} /> : <ArrowUpWideNarrow size={14} />}
+                             {sortOrder === 'desc' ? 'Modificado Recentemente' : 'Modificado Antigamente'}
+                           </button>
+                        </div>
+
+                        {/* Botão Adicionar Video na aba Pendentes */}
+                        <button 
+                            onClick={() => setIsModalOpen(true)}
+                            className="w-full py-4 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-500 hover:border-shopee-400 hover:bg-shopee-50 hover:text-shopee-600 transition-all group mb-2 bg-gray-50/50"
+                        >
+                            <div className="bg-white p-3 rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform border border-gray-100">
+                                <Plus size={24} className="text-shopee-500" />
+                            </div>
+                            <span className="font-bold">Adicionar Novo Vídeo</span>
+                            <span className="text-xs opacity-75">Gerar estratégia viral com IA</span>
+                        </button>
+
                         {pendingItems.length === 0 ? (
-                             <div className="text-center py-20 opacity-50 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                             <div className="text-center py-10 opacity-50 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
                                 <Video size={48} className="mx-auto mb-2 text-gray-300" />
                                 <p className="text-gray-500">Nenhum vídeo pendente</p>
                              </div>
@@ -368,7 +480,7 @@ export const App = () => {
                                )}
                            </h2>
                            <button 
-                               onClick={loadExternalVideos}
+                               onClick={() => loadExternalVideos(true)}
                                disabled={loadingExternal}
                                className="text-sm flex items-center gap-2 text-shopee-600 hover:bg-shopee-50 px-3 py-1.5 rounded-lg transition-colors font-medium border border-shopee-100"
                            >
@@ -377,7 +489,7 @@ export const App = () => {
                            </button>
                         </div>
                         <ExternalVideoList 
-                            videos={externalVideos}
+                            videos={sortedExternalVideos}
                             isLoading={loadingExternal}
                             onDismiss={handleDismissExternal}
                             onImport={handleImportExternal}
@@ -387,6 +499,12 @@ export const App = () => {
                             onSelectAll={() => setSelectedInboxIds(prev => prev.length === externalVideos.length ? [] : externalVideos.map(v => v.id))}
                             onBulkImport={handleBulkImport}
                             bulkProgress={bulkProgress}
+                            sortType={inboxSortType}
+                            sortOrder={inboxSortOrder}
+                            onSortChange={(type, order) => {
+                                setInboxSortType(type);
+                                setInboxSortOrder(order);
+                            }}
                         />
                     </>
                 )}
@@ -410,10 +528,16 @@ export const App = () => {
                 )}
 
                 {activeTab === 'posted' && (
-                    <PostedVideoList 
-                        items={postedItemsList}
-                        onStatusChange={handleStatusChange}
-                    />
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-2 text-xs text-gray-500 bg-blue-50 p-2 rounded-lg border border-blue-100">
+                             <Clock size={14} className="text-blue-500" />
+                             Itens postados desaparecem automaticamente após 24 horas.
+                        </div>
+                        <PostedVideoList 
+                            items={postedItemsList}
+                            onStatusChange={handleStatusChange}
+                        />
+                    </div>
                 )}
 
             </main>
