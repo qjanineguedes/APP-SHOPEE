@@ -218,11 +218,14 @@ export const fetchExternalVideos = async (lastVisitTimestamp: number): Promise<E
 
     const affiliateLink = extractLinkFromCaption(caption) || messageLink;
 
-    // GERAR ID ESTÁVEL:
-    // Antes usávamos o índice 'i', o que fazia o ID mudar se a ordem do CSV mudasse.
-    // Agora usamos um hash do Timestamp + Link Original para garantir que o ID
-    // seja sempre o mesmo para o mesmo conteúdo. Isso corrige o bug de itens deletados reaparecerem.
-    const uniqueKey = `${rawTimestamp.trim()}-${rawDropboxLink.trim()}`;
+    // --- CORREÇÃO DE ID ---
+    // Removemos query strings do link para gerar o ID, pois o Dropbox muda os parâmetros (rlkey, st, etc)
+    // frequentemente, o que alterava o ID e fazia o vídeo reaparecer.
+    const cleanUrlKey = finalVideoUrl.split('?')[0].split('&')[0];
+    
+    // Usamos o 'timestamp' numérico em vez do 'rawTimestamp' string.
+    // Assim, se o CSV mudar de "2023-10-27" para "27/10/2023", o ID continua o mesmo.
+    const uniqueKey = `${timestamp}-${cleanUrlKey}`; 
     const stableId = `vid-${generateHash(uniqueKey)}`;
 
     const isNew = timestamp > lastVisitTimestamp;
