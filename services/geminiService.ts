@@ -9,32 +9,32 @@ const outputSchema: Schema = {
   properties: {
     productName: {
       type: Type.STRING,
-      description: "O nome comercial exato do produto identificado na imagem/link. Curto e formatado (Title Case).",
+      description: "O nome comercial do produto identificado.",
     },
     caption: {
       type: Type.STRING,
-      description: "Shopee: Legenda viral ULTRA CURTA (máx 80 caracteres). Foco em benefício imediato.",
+      description: "Shopee: Legenda criativa e focada em benefícios e persuasão.",
     },
     hashtags: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: "Shopee: Lista de 3 a 5 palavras-chave curtas. O TOTAL (Legenda + Tags) deve ser menor que 150 caracteres. RETORNE APENAS AS PALAVRAS.",
+      description: "Shopee: Lista de hashtags relevantes para o nicho do produto.",
     },
     tiktok: {
       type: Type.OBJECT,
       properties: {
-        description: { type: Type.STRING, description: "TikTok: Descrição viral, perguntas para engajar." },
-        hashtags: { type: Type.ARRAY, items: { type: Type.STRING }, description: "TikTok: 6 Hashtags de alto alcance." },
-        music: { type: Type.STRING, description: "Sugestão de nome de música viral do momento (ex: Funk, Pop, Trap)." }
+        description: { type: Type.STRING, description: "TikTok: Descrição com linguagem viral e engajadora." },
+        hashtags: { type: Type.ARRAY, items: { type: Type.STRING }, description: "TikTok: Hashtags de alto alcance e nicho." },
+        music: { type: Type.STRING, description: "Sugestão de música ou estilo em alta." }
       },
       required: ["description", "hashtags", "music"]
     },
     pinterest: {
       type: Type.OBJECT,
       properties: {
-        title: { type: Type.STRING, description: "Pinterest: Título SEO otimizado e chamativo." },
-        description: { type: Type.STRING, description: "Pinterest: Descrição rica em palavras-chave com CTA forte no final." },
-        altText: { type: Type.STRING, description: "Pinterest: Texto alternativo descrevendo visualmente o produto/vídeo para leitores de tela." }
+        title: { type: Type.STRING, description: "Pinterest: Título otimizado para SEO." },
+        description: { type: Type.STRING, description: "Pinterest: Descrição detalhada e inspiradora com CTA." },
+        altText: { type: Type.STRING, description: "Pinterest: Texto alternativo para acessibilidade visual." }
       },
       required: ["title", "description", "altText"]
     }
@@ -62,28 +62,88 @@ const getClient = () => {
   return new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 };
 
+// --- AUDIO HELPERS ---
+
+const writeUTFBytes = (view: DataView, offset: number, string: string) => {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+};
+
+// Converte Raw PCM (24kHz, 1ch, 16bit) para WAV com Header
+const pcmToWav = (base64Pcm: string): string => {
+  const binaryString = atob(base64Pcm);
+  const len = binaryString.length;
+  const buffer = new ArrayBuffer(44 + len);
+  const view = new DataView(buffer);
+  
+  // RIFF identifier
+  writeUTFBytes(view, 0, 'RIFF');
+  // file length
+  view.setUint32(4, 36 + len, true);
+  // RIFF type
+  writeUTFBytes(view, 8, 'WAVE');
+  // format chunk identifier
+  writeUTFBytes(view, 12, 'fmt ');
+  // format chunk length
+  view.setUint32(16, 16, true);
+  // sample format (1 is PCM)
+  view.setUint16(20, 1, true);
+  // channel count (1 for mono)
+  view.setUint16(22, 1, true);
+  // sample rate (24000)
+  view.setUint32(24, 24000, true);
+  // byte rate (SampleRate * NumChannels * BitsPerSample/8)
+  view.setUint32(28, 48000, true);
+  // block align (NumChannels * BitsPerSample/8)
+  view.setUint16(32, 2, true);
+  // bits per sample
+  view.setUint16(34, 16, true);
+  // data chunk identifier
+  writeUTFBytes(view, 36, 'data');
+  // data chunk length
+  view.setUint32(40, len, true);
+
+  // Write PCM data
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < len; i++) {
+    bytes[44 + i] = binaryString.charCodeAt(i);
+  }
+
+  // Convert buffer back to base64 string
+  let binary = '';
+  const bytesLen = bytes.byteLength;
+  const chunk = 8192; // Process in chunks to avoid stack overflow
+  for (let i = 0; i < bytesLen; i += chunk) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+  }
+  
+  return btoa(binary);
+};
+
 export const generateVideoContent = async (params: AIGenerationParams): Promise<GeneratedContent> => {
   const ai = getClient();
 
   const systemPrompt = `
-    Você é um estrategista sênior de Conteúdo Viral e E-commerce (Shopee, TikTok, Pinterest).
+    Você é um estrategista de Conteúdo Viral e E-commerce.
     
     TAREFA: Analisar o produto e gerar conteúdo otimizado para 3 plataformas.
     
-    1. SHOPEE VIDEO (IMPORTANTE: LIMITE ESTRITO DE 150 CARACTERES TOTAIS):
-       - Legenda: Deve ser ULTRA CURTA e direta (max 70-80 chars).
-       - Hashtags: 3 a 5 tags curtas e fortes.
-       - A SOMA da Legenda + Hashtags NÃO PODE PASSAR DE 150 CARACTERES.
+    1. SHOPEE VIDEO:
+       - Legenda: Criativa, persuasiva e com uso estratégico de emojis. Foque em benefícios.
+       - Hashtags: 5 a 8 tags relevantes.
+       - REGRA CRÍTICA: A soma dos caracteres da Legenda + Hashtags NÃO deve ultrapassar 150 caracteres no total. 
+       - Se necessário, reduza a legenda para caber. Priorize as hashtags mais fortes.
     
     2. TIKTOK:
-       - Descrição: Linguagem nativa da plataforma (POV, "Eu preciso disso", etc).
-       - Hashtags: 6 tags virais (ex: #fyp, #achadinhos).
-       - Música: Sugira um estilo ou música em alta.
+       - Descrição: Linguagem nativa da plataforma (POV, trends, narrativa).
+       - Hashtags: Misture tags do nicho com tags virais.
+       - Música: Sugira um estilo ou música que combine com o produto.
        
     3. PINTEREST:
        - Título: SEO (O que é + Benefício).
-       - Descrição: Detalhada + CTA (Chamada para Ação) clicando no link.
-       - Texto Alternativo: Descreva os detalhes visuais do vídeo/produto para acessibilidade.
+       - Descrição: Inspiradora e informativa com CTA.
+       - Texto Alternativo: Descrição visual clara do produto.
     
     IMPORTANTE: Retorne APENAS as palavras das hashtags, sem o símbolo '#'.
   `;
@@ -125,14 +185,28 @@ export const generateVideoContent = async (params: AIGenerationParams): Promise<
         systemInstruction: systemPrompt,
         responseMimeType: "application/json",
         responseSchema: outputSchema,
-        temperature: 0.7, // Um pouco mais criativo, mas controlado
+        temperature: 0.7, 
       },
     });
 
     const text = response.text;
     if (!text) throw new Error("Resposta vazia da IA");
 
-    return JSON.parse(text) as GeneratedContent;
+    const content = JSON.parse(text) as GeneratedContent;
+
+    // Limpeza básica (sem truncamento agressivo de caracteres)
+    if (content.caption) {
+      content.caption = content.caption.trim();
+    }
+
+    if (Array.isArray(content.hashtags)) {
+      // Remove # e caracteres especiais, mantendo a integridade das tags
+      content.hashtags = content.hashtags
+        .map(tag => tag.replace(/[#\s.,;!?]/g, ''))
+        .filter(tag => tag.length > 1);
+    }
+
+    return content;
   } catch (error) {
     console.error("Gemini Generation Error:", error);
     throw error;
@@ -220,31 +294,31 @@ export const generateToolContent = async (toolId: ToolId, input: string): Promis
       systemPrompt = `You are an AI assistant. Task: Generate 5 Shopee search keywords for this product.`;
       break;
     case 'reels_script':
-      systemPrompt = "Crie um roteiro completo para Reels/TikTok focado em vendas na Shopee. Estrutura obrigatória: 1. Gancho Visual/Sonoro (3s), 2. Desenvolvimento (Problema/Solução), 3. Revelação do Preço/Oferta, 4. CTA Clara. Use linguagem dinâmica e viral.";
+      systemPrompt = "Crie um roteiro completo para Reels/TikTok focado em vendas na Shopee. Estrutura: Gancho (3s), Desenvolvimento e CTA.";
       break;
     case 'stories_phrases':
-      systemPrompt = "Gere 5 opções de frases engajadoras para Stories do Instagram/WhatsApp para vender este produto. Devem ser curtas, gerar curiosidade e pedir interação (enquetes, directs).";
+      systemPrompt = "Gere 5 opções de frases engajadoras para Stories do Instagram/WhatsApp para vender este produto.";
       break;
     case 'narration_script':
-      systemPrompt = "Escreva um texto fluido e natural para ser narrado em off (voiceover) em um vídeo de review de produto. Tom: Entusiasta, amigo aconselhando amigo. Foque nos benefícios. Máximo 1 minuto de fala.";
+      systemPrompt = "Escreva um texto fluido e natural para ser narrado em off (voiceover) em um vídeo de review de produto. Foco nos benefícios.";
       break;
     case 'daily_plan':
-      systemPrompt = "Crie um planejamento diário de conteúdo para este nicho. Sugira: 1 Post para Manhã (Stories), 1 Post para Almoço (Reels/Vídeo), 1 Post para Noite (Prova Social/Oferta). Seja específico.";
+      systemPrompt = "Crie um planejamento diário de conteúdo para este nicho (Manhã, Tarde, Noite).";
       break;
     case 'persuasive_invite':
-      systemPrompt = "Crie um texto persuasivo para convidar seguidores para uma Live Shop ou para entrar em um Grupo de Ofertas. Use gatilhos mentais de Escassez e Exclusividade.";
+      systemPrompt = "Crie um texto persuasivo para convidar seguidores para uma Live Shop ou Grupo de Ofertas.";
       break;
     case 'viral_ad':
-      systemPrompt = "Crie uma copy para anúncio pago (Ads). Estrutura AIDA (Atenção, Interesse, Desejo, Ação). Foco em ROI e clique imediato.";
+      systemPrompt = "Crie uma copy para anúncio pago (Ads) usando estrutura AIDA.";
       break;
     case 'bio_generator':
-      systemPrompt = "Gere 3 opções de Bio Profissional para perfil de Achadinhos/Afiliado. Inclua emojis, autoridade e chamada para o link na bio. Limite de 150 caracteres por opção.";
+      systemPrompt = "Gere 3 opções de Bio Profissional para perfil de Achadinhos/Afiliado.";
       break;
     case 'product_validation':
-      systemPrompt = "Atue como um analista de mercado. Analise este produto/nicho. Liste: 3 Pontos Fortes para venda, 2 Objeções prováveis dos clientes (e como contornar), e Nota de 0 a 10 para potencial viral na Shopee Videos.";
+      systemPrompt = "Analise este produto: Pontos Fortes, Objeções e Potencial Viral (0-10).";
       break;
     case 'trends':
-      systemPrompt = "Liste 5 ideias de vídeos baseadas em tendências atuais (trends, áudios, formatos) que podem ser adaptadas para este nicho/produto. Seja criativo.";
+      systemPrompt = "Liste 5 ideias de vídeos baseadas em tendências atuais para este nicho.";
       break;
   }
 
@@ -279,7 +353,7 @@ export const generateAudio = async (text: string): Promise<ToolResult> => {
         responseModalities: [Modality.AUDIO],
         speechConfig: {
           voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' }, // Voz feminina clara e profissional
+            prebuiltVoiceConfig: { voiceName: 'Kore' },
           },
         },
       },
@@ -290,10 +364,13 @@ export const generateAudio = async (text: string): Promise<ToolResult> => {
     if (!audioData) {
       throw new Error("Não foi possível gerar o áudio.");
     }
+    
+    // Convert Raw PCM to valid WAV with header
+    const wavData = pcmToWav(audioData);
 
     return { 
       text: text,
-      audioData: audioData
+      audioData: wavData
     };
   } catch (error) {
     console.error("TTS Error:", error);

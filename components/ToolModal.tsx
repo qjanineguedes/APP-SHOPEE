@@ -189,9 +189,12 @@ export const ToolModal: React.FC<ToolModalProps> = ({ tool, onClose }) => {
   const toggleAudio = () => {
     if (!result?.audioData) return;
 
-    if (!audioRef.current || audioRef.current.src !== `data:audio/mp3;base64,${result.audioData}`) {
-      const audioUrl = `data:audio/mp3;base64,${result.audioData}`;
-      audioRef.current = new Audio(audioUrl);
+    // Use audio/wav because we converted PCM to WAV in the service
+    const mimeType = 'audio/wav';
+    const sourceUrl = `data:${mimeType};base64,${result.audioData}`;
+
+    if (!audioRef.current || audioRef.current.src !== sourceUrl) {
+      audioRef.current = new Audio(sourceUrl);
       audioRef.current.onended = () => setIsPlaying(false);
     }
 
@@ -199,7 +202,10 @@ export const ToolModal: React.FC<ToolModalProps> = ({ tool, onClose }) => {
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
-      audioRef.current.play();
+      audioRef.current.play().catch(e => {
+        console.error("Play error:", e);
+        alert("Não foi possível reproduzir o áudio.");
+      });
       setIsPlaying(true);
     }
   };

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ExternalVideo } from '../types';
-import { Download, Link as LinkIcon, Check, Copy, ExternalLink, Calendar, ShoppingBag, Trash2, ArrowDownToLine, Sparkles, Loader2, FileText, Send, Square, CheckSquare } from 'lucide-react';
+import { Download, Link as LinkIcon, Check, Copy, ExternalLink, Calendar, ShoppingBag, Trash2, Sparkles, Loader2, FileText, Send, Square, CheckSquare } from 'lucide-react';
 
 // Utility para cópia segura
 const copyToClipboard = async (text: string) => {

@@ -27,52 +27,77 @@ const generateHash = (str: string): string => {
 
 /**
  * Transforma URLs do Dropbox para garantir o download direto e compatibilidade CORS.
- * Substitui www.dropbox.com por dl.dropboxusercontent.com.
+ * Agora utiliza URL Object para manipulação segura e valida se é um arquivo.
  */
 const getDirectLink = (url: string): string => {
   if (!url) return '';
-  url = url.trim();
+  let cleanUrl = url.trim();
   
-  // Se não for Dropbox, retorna como está
-  if (!url.includes('dropbox.com')) return url;
+  // Se não for Dropbox, retorna como está (assumindo link direto válido de outra fonte)
+  if (!cleanUrl.includes('dropbox.com')) return cleanUrl;
 
-  // 1. Substituir domínio para dl.dropboxusercontent.com (Melhor suporte a CORS e download direto)
-  // Isso evita a página de preview HTML que causa o erro "returned HTML"
-  let directUrl = url.replace(/^(https?:\/\/)?(www\.)?dropbox\.com/, 'https://dl.dropboxusercontent.com');
+  try {
+    // 1. Validação de Estrutura: Links de pasta (/sh/) não são arquivos diretos
+    // Tentar baixar uma pasta como vídeo resulta em erro ou HTML, então filtramos aqui.
+    if (cleanUrl.includes('/sh/')) {
+       return '';
+    }
 
-  // 2. Limpar parâmetros de controle de download antigos (dl=x, raw=x) para evitar conflitos
-  // O domínio dl.dropboxusercontent.com já entrega o arquivo raw
-  directUrl = directUrl.replace(/([?&])(dl=[01]|raw=[01])(&?)/g, '$1');
-  
-  // 3. Limpeza final de caracteres soltos (? ou & duplicados ou no final)
-  // Substitui ?& por ?
-  directUrl = directUrl.replace(/\?&/g, '?');
-  // Remove & ou ? do final
-  if (directUrl.endsWith('&') || directUrl.endsWith('?')) {
-    directUrl = directUrl.slice(0, -1);
+    // 2. Normalização do Domínio para DL (Download Direct)
+    // dl.dropboxusercontent.com força o download do binário e evita a renderização da página HTML de preview
+    cleanUrl = cleanUrl.replace(/^(https?:\/\/)?(www\.)?dropbox\.com/, 'https://dl.dropboxusercontent.com');
+
+    // 3. Sanitização de Parâmetros via URL Object (Mais robusto que Regex)
+    const urlObj = new URL(cleanUrl);
+    
+    // Remove parâmetros que controlam a visualização na interface web ou forçam download via header
+    // dl=1 ou raw=1 às vezes conflitam com o domínio dl.dropboxusercontent.com
+    urlObj.searchParams.delete('dl');
+    urlObj.searchParams.delete('raw');
+    urlObj.searchParams.delete('preview');
+    urlObj.searchParams.delete('subfolder_nav_tracking');
+    
+    // IMPORTANTE: Mantém 'rlkey' e 'st' que são tokens de segurança obrigatórios para links privados
+    
+    return urlObj.toString();
+
+  } catch (e) {
+    // Fallback silencioso se a URL estiver mal formatada
+    return '';
   }
-
-  return directUrl;
 };
 
 /**
  * Extrai links da legenda priorizando Shopee.
+ * Refinado para lidar com pontuação no final do link e múltiplos links.
  */
 const extractLinkFromCaption = (caption: string): string => {
   if (!caption) return '';
   
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  // Regex que captura URLs começando com http/https até o próximo espaço
+  const urlRegex = /https?:\/\/[^\s]+/g;
   const matches = caption.match(urlRegex);
   
   if (!matches || matches.length === 0) return '';
 
-  const shopeeMatch = matches.find(url => 
+  // Limpa pontuações comuns que podem ficar grudadas no final da URL (.,;:)
+  const cleanMatches = matches.map(url => url.replace(/[.,;:)]+$/, ''));
+
+  // Prioridade 1: Links Curtos Shopee (shope.ee ou s.shopee) - Mais valiosos para afiliados
+  const shopeeShort = cleanMatches.find(url => 
     url.includes('shope.ee') || 
-    url.includes('s.shopee') || 
+    url.includes('s.shopee')
+  );
+  if (shopeeShort) return shopeeShort;
+
+  // Prioridade 2: Links Shopee Completos
+  const shopeeLong = cleanMatches.find(url => 
     url.includes('shopee.com.br')
   );
-  
-  return shopeeMatch || matches[0];
+  if (shopeeLong) return shopeeLong;
+
+  // Fallback: Retorna o primeiro link encontrado se não houver Shopee
+  return cleanMatches[0];
 };
 
 /**
@@ -203,6 +228,11 @@ export const fetchExternalVideos = async (lastVisitTimestamp: number): Promise<E
     // Aplica getDirectLink em cada vídeo para garantir que o link seja 'baixável' via CORS
     const finalVideoUrl = getDirectLink(rawDropboxLink);
 
+    // VALIDAÇÃO: Se o link foi identificado como inválido (ex: pasta /sh/), ignoramos este item
+    if (!finalVideoUrl) {
+      continue;
+    }
+
     const timestamp = parseTimestamp(rawTimestamp);
     
     // Formata a data para exibição (Incluindo Hora e Minuto)
@@ -218,13 +248,10 @@ export const fetchExternalVideos = async (lastVisitTimestamp: number): Promise<E
 
     const affiliateLink = extractLinkFromCaption(caption) || messageLink;
 
-    // --- CORREÇÃO DE ID ---
+    // --- ID ROBUSTO ---
     // Removemos query strings do link para gerar o ID, pois o Dropbox muda os parâmetros (rlkey, st, etc)
-    // frequentemente, o que alterava o ID e fazia o vídeo reaparecer.
+    // Usamos o 'timestamp' numérico.
     const cleanUrlKey = finalVideoUrl.split('?')[0].split('&')[0];
-    
-    // Usamos o 'timestamp' numérico em vez do 'rawTimestamp' string.
-    // Assim, se o CSV mudar de "2023-10-27" para "27/10/2023", o ID continua o mesmo.
     const uniqueKey = `${timestamp}-${cleanUrlKey}`; 
     const stableId = `vid-${generateHash(uniqueKey)}`;
 

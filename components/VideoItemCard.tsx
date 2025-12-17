@@ -102,7 +102,7 @@ export const VideoItemCard: React.FC<VideoItemCardProps> = ({
   };
 
   const formatDate = (dateStr?: string) => {
-    if (!dateStr) return 'Não agendado';
+    if (!dateStr) return null;
     return new Date(dateStr).toLocaleDateString('pt-BR', { 
       day: '2-digit', 
       month: 'short', 
@@ -192,10 +192,12 @@ export const VideoItemCard: React.FC<VideoItemCardProps> = ({
               <h3 className="font-bold text-gray-800 text-lg leading-tight">{item.productName}</h3>
               <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-2">
                 {item.category && <span className="bg-gray-100 border border-gray-200 px-2 py-1 rounded-md">{item.category}</span>}
-                <span className="flex items-center gap-1 bg-gray-50 border border-gray-200 px-2 py-1 rounded-md">
-                  <Calendar size={12} />
-                  {formatDate(item.scheduledDate)}
-                </span>
+                {item.scheduledDate && (
+                  <span className="flex items-center gap-1 bg-gray-50 border border-gray-200 px-2 py-1 rounded-md">
+                    <Calendar size={12} />
+                    {formatDate(item.scheduledDate)}
+                  </span>
+                )}
               </div>
             </div>
             
